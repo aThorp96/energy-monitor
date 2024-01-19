@@ -3,8 +3,8 @@
 
 // Create an instance
 EnergyMonitor emon1;
-int lastSend = 0;
-int now = 0;
+unsigned long lastSend = 0;
+unsigned long  now = 0;
 
 #define IPIN 1
 #define VPIN 2
@@ -24,6 +24,7 @@ void loop() {
         Serial.print(',');
         Serial.print(analogRead(IPIN));
         Serial.print(',');
-        Serial.println(emon1.readVcc());
+        Serial.print(emon1.readVcc());
+        Serial.println();
     }
 }
