@@ -7,8 +7,8 @@ import io
 import math
 import time
 
-import matplotlib.pyplot as plt
-import numpy as np
+
+sample_count = 0
 
 
 class Receiver:
@@ -42,9 +42,11 @@ class Receiver:
         """ returns (V_read, I_read, VCC)"""
         line = self.ser.readline()
         values = line.split(b',')
-        if len(values) != 3:
+        if len(values) != 3 or values[0] == b'VREAD':
             return (0, 0, 0)
 
+        global sample_count
+        sample_count += 1
         return (int(v) for v in values)
 
     def calc_i_rms(self, n_samples: int) -> int:
@@ -73,13 +75,12 @@ MICROS = -1
 start_time = dt.datetime.now()
 current_time = dt.datetime.now()
 filename = f"output_{start_time.isoformat()}.txt"
-count = 0
 
 
 def signal_handler(signal, frame):
     duration = dt.datetime.now() - start_time
     if duration.seconds > 0:
-        print(f"---\nCaptured {count / duration.seconds} data points per second")
+        print(f"---\nCaptured {sample_count / duration.seconds} data points per second")
 
     sys.exit(0)
 
@@ -94,4 +95,4 @@ if __name__ == "__main__":
     #     receiver.run(file)
 
     while 1:
-        print(receiver.calc_i_rms(1000))
+        print(receiver.calc_i_rms(25))
