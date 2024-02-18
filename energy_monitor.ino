@@ -12,7 +12,12 @@ unsigned long  now = 0;
 void setup(){
     Serial.begin(115200);
 
-    Serial.println("VREAD,IREAD,VCC");
+        Serial.print("VPIN");
+        Serial.print(',');
+        Serial.print("IPIN");
+        Serial.print(',');
+        Serial.print("readVcc");
+        Serial.println();
 }
 
 
