@@ -3,16 +3,21 @@ import datetime as dt
 import serial
 import signal
 import sys
-import io
 import math
 import datetime
+from time import sleep
 
 
-sample_count = 0
+class Cmd:
+    STOP = b'X'
+    START = b'S'
+    ACK = b'A'
+    KAY = b'K'
 
 
 class Receiver:
     ser: serial.Serial
+    sample_count: int = 0
 
     offset_i: float
     offset_v: float
@@ -51,15 +56,24 @@ class Receiver:
             timeout=1,
         )
 
+        self._handshake()
+
+    def _handshake(self):
+        self.ser.write(Cmd.STOP)
+        sleep(1)
+        self.ser.read_all()
+
+        self.ser.write(Cmd.START)
+        self.ser.read_until(Cmd.ACK)
+        self.ser.write(Cmd.KAY)
+
     def _read(self) -> (int, int, int):
         """returns (V_read, I_read, VCC)"""
-        line = self.ser.readline()
-        values = line.split(b",")
-        if len(values) != 3 or values[0] == b"VREAD":
-            raise ValueError("Error reading input")
-        global sample_count
-        sample_count += 1
-        return (int(v) for v in values)
+        voltage: int = int.from_bytes(self.ser.read(2), byteorder='little')
+        current: int = int.from_bytes(self.ser.read(2), byteorder='little')
+        vcc: int = int.from_bytes(self.ser.read(4), byteorder='little')
+        self.sample_count += 1
+        return (voltage, current, vcc)
 
     def calc_i_rms(self, n_samples: int) -> int:
         sum_raw = 0
@@ -115,12 +129,7 @@ class Receiver:
         start = dt.datetime.now()
 
         while True:
-            try:
-                start_v, _, supply_voltage = self._read()
-            except ValueError:
-                print("error reading inputs", file=sys.stderr)
-                continue
-            sample_count += 1
+            start_v, _, supply_voltage = self._read()
             if (start_v < (self.adc_counts * 0.55)) and (
                 start_v > (self.adc_counts * 0.45)
             ):
@@ -175,15 +184,9 @@ class Receiver:
             if last_sample_crossed != check_cross:
                 cross_count += 1
 
-            # print("---")
-            # print(f"sample_count: {sample_count}")
-            # print(f"sumv: {sum_v}")
-            # print(f"sumi: {sum_i}")
-            # print(f"cross_count: {cross_count}")
-            # print(f"crossed?: {check_cross}")
-
         v_ratio = self.v_calibration * ((supply_voltage/1000.0) / (self.adc_counts))
         vrms = v_ratio * math.sqrt(sum_v / sample_count)
+        print(f"voltage: {vrms}, ratio: {v_ratio}, offset: {self.offset_v}")
 
         i_ratio = self.i_calibration * ((supply_voltage/1000.0) / (self.adc_counts))
         irms = i_ratio * math.sqrt(sum_v / sample_count)
@@ -192,42 +195,36 @@ class Receiver:
         apparent_power = vrms * irms
         power_factor = real_power / apparent_power
 
-        breakpoint()
-        print(f"{real_power} {apparent_power} {vrms} {irms} {power_factor}")
-
         return real_power
 
 
-MICROS = -1
-start_time = dt.datetime.now()
-current_time = dt.datetime.now()
-filename = f"output_{start_time.isoformat()}.txt"
+def __main__():
 
+    tty = sys.argv[1]
 
-def signal_handler(signal, frame):
-    duration = dt.datetime.now() - start_time
-    if duration.seconds > 0:
-        print(
-            f"---\nCaptured {sample_count / duration.seconds} data points per second",
-            file=sys.stderr,
-        )
+    receiver = Receiver(tty, 54.5, 120.0, 1.0)
 
-    sys.exit(0)
+    start_time = dt.datetime.now()
+
+    def signal_handler(signal, frame):
+        duration = dt.datetime.now() - start_time
+        if duration.seconds > 0:
+            print(
+                f"---\nCaptured {receiver.sample_count / duration.seconds} data points per second",
+                file=sys.stderr,
+            )
+            receiver.ser.write(Cmd.STOP)
+            receiver.ser.read_all()
+
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+
+    print("time,value")
+
+    while 1:
+        print(dt.datetime.now(), receiver.calc_i_rms(300) * 122.9)
 
 
 if __name__ == "__main__":
-    tty = sys.argv[1]
-    signal.signal(signal.SIGINT, signal_handler)
-
-    receiver = Receiver(tty, 54.5, 110.0, 1.7)
-    receiver.ser.readline()
-
-    # with io.open(filename, "w") as file:
-    #     receiver.run(file)
-    print("sample_number,value")
-
-    while 1:
-        # receiver.calc_i_rms(300)
-        # print(receiver.offset_i)
-        real_power = receiver.calc_voltage_current(20, 2)
-        print(f"{datetime.datetime.now()},{real_power}")
+    __main__()
