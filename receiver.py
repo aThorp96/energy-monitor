@@ -4,6 +4,7 @@ import serial
 import signal
 import sys
 import math
+import time
 import datetime
 from time import sleep
 import typing as t
@@ -54,27 +55,21 @@ T = t.TypeVar("T")
 
 
 class Reading(t.Generic[T]):
-    start: datetime.datetime
-    stop: datetime.datetime
+    start_ns: int
+    stop_ns: int
     value: T
 
     def __init__(self, start: datetime.datetime, stop: datetime.datetime, value: T):
-        self.start = start
-        self.stop = stop
+        self.start_ns = start
+        self.stop_ns = stop
         self.value = value
 
     @classmethod
     def csv_header(cls, value_title: str, units: str) -> str:
         return f"sample start (ns), sample end (ns), {value_title} ({units})"
 
-    def _datetime_to_ns(self, dt: datetime.datetime) -> int:
-        timestamp = dt.timestamp()
-        # Convert from seconds to to ns
-        timestamp *= 1000 * 1000 * 1000
-        return int(timestamp)
-
     def __str__(self) -> str:
-        return f"{self._datetime_to_ns(self.start)}, {self._datetime_to_ns(self.stop)}, {self.value}"
+        return f"{self.start_ns}, {self.stop_ns}, {self.value}"
 
 
 class Cmd:
@@ -146,7 +141,8 @@ class Receiver:
 
     def stream_i_rms(self, n_samples: int, samples_per_second: float) -> t.Iterable[Reading[float]]:
         squares_buff = CircularBuffer(n_samples)
-        last_sample_time = datetime.datetime.now()
+        last_sample_time = time.monotonic_ns()
+        ns_per_sample = (1.0/samples_per_second) * 1000 * 1000 * 1000
 
         while True:
             try:
@@ -168,13 +164,13 @@ class Receiver:
             if squares_buff.full():
                 i_ratio = self.i_calibration * ((voltage / 1000.0) / self.adc_counts)
 
-                now = datetime.datetime.now()
-                time_difference = now - last_sample_time
+                now = time.monotonic_ns()
+                time_difference_ns = now - last_sample_time
 
-                if time_difference.total_seconds() >= 1 / samples_per_second:
+                if time_difference_ns >= ns_per_sample:
                     irms = i_ratio * math.sqrt(squares_buff.mean())
                     yield Reading(last_sample_time, now, irms)
-                    last_sample_time = datetime.datetime.now()
+                    last_sample_time = time.monotonic_ns()
 
     def calc_i_rms(self, n_samples: int) -> int:
         sum_raw = 0
@@ -321,7 +317,7 @@ def __main__():
 
     signal.signal(signal.SIGINT, signal_handler)
 
-    print(Reading.csv_header("apparent power", "Volt Amps"))
+    print(Reading.csv_header("apparent power", "W"))
 
     for i_rms in receiver.stream_i_rms(1200, 10000):
         i_rms.value *= 122.2
