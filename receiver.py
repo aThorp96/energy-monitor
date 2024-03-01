@@ -6,6 +6,75 @@ import sys
 import math
 import datetime
 from time import sleep
+import typing as t
+
+
+class CircularBuffer:
+    _buffer: list[float]
+    _buffer_size: int
+    _front: int
+    _back: int
+    _full: bool
+    _sum: float
+
+    def __init__(self, buffer_size: int):
+        self._buffer_size = buffer_size
+        self._buffer = [0] * buffer_size
+        self._front = 0
+        self._back = 0
+        self._sum = 0
+        self._full = False
+
+    def append(self, value: float):
+        self._incrememnt_index()
+
+        self._sum -= self._buffer[self._front]
+        self._buffer[self._front] = value
+        self._sum += value
+
+    def mean(self) -> float:
+        if self._full:
+            count = self._buffer_size
+        else:
+            count = self._front
+        return self._sum / count
+
+    def _incrememnt_index(self):
+        self._front = (self._front + 1) % self._buffer_size
+
+        if self._front == self._back:
+            self._full = True
+            self._back = (self._back + 1) % self._buffer_size
+
+    def full(self) -> bool:
+        return self._full
+
+
+T = t.TypeVar("T")
+
+
+class Reading(t.Generic[T]):
+    start: datetime.datetime
+    stop: datetime.datetime
+    value: T
+
+    def __init__(self, start: datetime.datetime, stop: datetime.datetime, value: T):
+        self.start = start
+        self.stop = stop
+        self.value = value
+
+    @classmethod
+    def csv_header(cls, value_title: str, units: str) -> str:
+        return f"sample start (ns), sample end (ns), {value_title} ({units})"
+
+    def _datetime_to_ns(self, dt: datetime.datetime) -> int:
+        timestamp = dt.timestamp()
+        # Convert from seconds to to ns
+        timestamp *= 1000 * 1000 * 1000
+        return int(timestamp)
+
+    def __str__(self) -> str:
+        return f"{self._datetime_to_ns(self.start)}, {self._datetime_to_ns(self.stop)}, {self.value}"
 
 
 class Cmd:
@@ -74,6 +143,38 @@ class Receiver:
         vcc: int = int.from_bytes(self.ser.read(4), byteorder='little')
         self.sample_count += 1
         return (voltage, current, vcc)
+
+    def stream_i_rms(self, n_samples: int, samples_per_second: float) -> t.Iterable[Reading[float]]:
+        squares_buff = CircularBuffer(n_samples)
+        last_sample_time = datetime.datetime.now()
+
+        while True:
+            try:
+                _, sample_i, vcc = self._read()
+            except ValueError:
+                print("error reading, continuing...", file=sys.stderr)
+                continue
+            voltage = vcc
+
+            # Digital low pass filter extracts the 2.5 V or 1.65 V dc offset,
+            # then subtract this - signal is now centered on 0 counts.
+            self.offset_i = self.offset_i + (sample_i - self.offset_i) / 1024
+            filtered_i = sample_i - self.offset_i
+
+            # RMS
+            sq_i: float = filtered_i * filtered_i
+            squares_buff.append(sq_i)
+
+            if squares_buff.full():
+                i_ratio = self.i_calibration * ((voltage / 1000.0) / self.adc_counts)
+
+                now = datetime.datetime.now()
+                time_difference = now - last_sample_time
+
+                if time_difference.total_seconds() >= 1 / samples_per_second:
+                    irms = i_ratio * math.sqrt(squares_buff.mean())
+                    yield Reading(last_sample_time, now, irms)
+                    last_sample_time = datetime.datetime.now()
 
     def calc_i_rms(self, n_samples: int) -> int:
         sum_raw = 0
@@ -220,10 +321,11 @@ def __main__():
 
     signal.signal(signal.SIGINT, signal_handler)
 
-    print("time,value")
+    print(Reading.csv_header("apparent power", "Volt Amps"))
 
-    while 1:
-        print(dt.datetime.now(), receiver.calc_i_rms(300) * 122.9)
+    for i_rms in receiver.stream_i_rms(1200, 10000):
+        i_rms.value *= 122.2
+        print(i_rms)
 
 
 if __name__ == "__main__":
