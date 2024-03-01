@@ -20,6 +20,7 @@ With the Mega2560 connected to a computer, the computer should begin
 receiving serial messages with readings from the 9vAC PSU, CT, and the
 Arduino VCC.
 
-In a terminal, run `python3 ./receiver.py`. This should start reading the
+In a terminal, run `python3 ./receiver.py <path/tp/arduino/tty>`. This should start reading the
 CT's readings and outputting calculations of Apparent Power.
+The output is in CSV format, with headers included.
 
