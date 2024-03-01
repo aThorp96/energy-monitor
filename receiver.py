@@ -10,6 +10,10 @@ from time import sleep
 import typing as t
 
 
+def get_now_ns() -> int:
+    return time.clock_gettime_ns(time.CLOCK_REALTIME)
+
+
 class CircularBuffer:
     _buffer: list[float]
     _buffer_size: int
@@ -141,7 +145,7 @@ class Receiver:
 
     def stream_i_rms(self, n_samples: int, samples_per_second: float) -> t.Iterable[Reading[float]]:
         squares_buff = CircularBuffer(n_samples)
-        last_sample_time = time.monotonic_ns()
+        last_sample_time = get_now_ns()
         ns_per_sample = (1.0/samples_per_second) * 1000 * 1000 * 1000
 
         while True:
@@ -164,13 +168,13 @@ class Receiver:
             if squares_buff.full():
                 i_ratio = self.i_calibration * ((voltage / 1000.0) / self.adc_counts)
 
-                now = time.monotonic_ns()
+                now = get_now_ns()
                 time_difference_ns = now - last_sample_time
 
                 if time_difference_ns >= ns_per_sample:
                     irms = i_ratio * math.sqrt(squares_buff.mean())
                     yield Reading(last_sample_time, now, irms)
-                    last_sample_time = time.monotonic_ns()
+                    last_sample_time = get_now_ns()
 
     def calc_i_rms(self, n_samples: int) -> int:
         sum_raw = 0
@@ -319,8 +323,8 @@ def __main__():
 
     print(Reading.csv_header("apparent power", "W"))
 
-    for i_rms in receiver.stream_i_rms(1200, 10000):
-        i_rms.value *= 122.2
+    for i_rms in receiver.stream_i_rms(250, 10000):
+        i_rms.value *= 120.0
         print(i_rms)
 
 
