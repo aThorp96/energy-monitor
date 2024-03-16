@@ -92,6 +92,8 @@ class Receiver:
     i_calibration: float
     v_calibration: float
 
+    cvv: float
+
     phase_shift: int
 
     adc_bits: int
@@ -124,24 +126,30 @@ class Receiver:
             timeout=1,
         )
 
-        self._handshake()
+        self.vcc = self._handshake()
 
-    def _handshake(self):
+    def _handshake(self) -> float:
         self.ser.write(Cmd.STOP)
         sleep(1)
         self.ser.read_all()
 
         self.ser.write(Cmd.START)
         self.ser.read_until(Cmd.ACK)
+        vcc = self._read_vcc()
         self.ser.write(Cmd.KAY)
 
-    def _read(self) -> (int, int, int):
+        return vcc
+
+    def _read_vcc(self) -> int:
+        return int.from_bytes(self.ser.read(4), byteorder='little')
+
+    def _read(self) -> int:
         """returns (V_read, I_read, VCC)"""
-        voltage: int = int.from_bytes(self.ser.read(2), byteorder='little')
+        # voltage: int = int.from_bytes(self.ser.read(2), byteorder='little')
         current: int = int.from_bytes(self.ser.read(2), byteorder='little')
-        vcc: int = int.from_bytes(self.ser.read(4), byteorder='little')
         self.sample_count += 1
-        return (voltage, current, vcc)
+
+        return current
 
     def stream_i_rms(self, n_samples: int, samples_per_second: float) -> t.Iterable[Reading[float]]:
         squares_buff = CircularBuffer(n_samples)
@@ -150,11 +158,10 @@ class Receiver:
 
         while True:
             try:
-                _, sample_i, vcc = self._read()
+                sample_i = self._read()
             except ValueError:
                 print("error reading, continuing...", file=sys.stderr)
                 continue
-            voltage = vcc
 
             # Digital low pass filter extracts the 2.5 V or 1.65 V dc offset,
             # then subtract this - signal is now centered on 0 counts.
@@ -166,7 +173,7 @@ class Receiver:
             squares_buff.append(sq_i)
 
             if squares_buff.full():
-                i_ratio = self.i_calibration * ((voltage / 1000.0) / self.adc_counts)
+                i_ratio = self.i_calibration * ((self.vcc / 1000.0) / self.adc_counts)
 
                 now = get_now_ns()
                 time_difference_ns = now - last_sample_time
@@ -179,15 +186,13 @@ class Receiver:
     def calc_i_rms(self, n_samples: int) -> int:
         sum_raw = 0
         sum_i = 0
-        voltage = 0
 
         for _ in range(n_samples):
             try:
-                _, sample_i, vcc = self._read()
+                sample_i = self._read()
             except ValueError:
                 print("error reading, continuing...", file=sys.stderr)
                 continue
-            voltage = vcc
 
             # Digital low pass filter extracts the 2.5 V or 1.65 V dc offset,
             # then subtract this - signal is now centered on 0 counts.
@@ -199,7 +204,7 @@ class Receiver:
             sq_i = filtered_i * filtered_i
             sum_i += sq_i
 
-        i_ratio = self.i_calibration * ((voltage / 1000.0) / self.adc_counts)
+        i_ratio = self.i_calibration * ((self.vcc / 1000.0) / self.adc_counts)
 
         irms = i_ratio * math.sqrt(sum_i / n_samples)
 
@@ -302,30 +307,38 @@ class Receiver:
 def __main__():
 
     tty = sys.argv[1]
-
     receiver = Receiver(tty, 54.5, 120.0, 1.0)
-
     start_time = dt.datetime.now()
 
-    def signal_handler(signal, frame):
-        duration = dt.datetime.now() - start_time
-        if duration.seconds > 0:
-            print(
-                f"---\nCaptured {receiver.sample_count / duration.seconds} data points per second",
-                file=sys.stderr,
-            )
-            receiver.ser.write(Cmd.STOP)
-            receiver.ser.read_all()
+    closed = False
 
+    def close():
+        nonlocal closed
+        if not closed:
+            closed = True
+            duration = dt.datetime.now() - start_time
+            if duration.seconds > 0:
+                print(
+                    f"---\nCaptured {receiver.sample_count / duration.seconds} data points per second",
+                    file=sys.stderr,
+                )
+                receiver.ser.write(Cmd.STOP)
+                receiver.ser.read_all()
+
+    def signal_handler(signal, frame):
+        close()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
 
     print(Reading.csv_header("apparent power", "W"))
 
-    for i_rms in receiver.stream_i_rms(250, 10000):
-        i_rms.value *= 120.0
-        print(i_rms)
+    try:
+        for i_rms in receiver.stream_i_rms(500, 10000):
+            i_rms.value *= 120.0
+            print(i_rms)
+    finally:
+        close()
 
 
 if __name__ == "__main__":

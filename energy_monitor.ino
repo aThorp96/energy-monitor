@@ -34,6 +34,10 @@ void loop() {
       if (command == CMD_START) {
         started = true;
         Serial.write(CMD_ACK);
+
+        vcc = emon1.readVcc();
+        Serial.write(vccBuff, 4);
+
         while (command != CMD_KAY) {
           command = Serial.read();
         }
@@ -43,12 +47,11 @@ void loop() {
   }
 
   if (started) {
-    voltageValue = analogRead(VPIN);
+    // voltageValue = analogRead(VPIN);
     currentValue = analogRead(IPIN);
-    vcc = emon1.readVcc();
+    // ;
 
-    Serial.write(vBuff, 2);
+    // Serial.write(vBuff, 2);
     Serial.write(cBuff, 2);
-    Serial.write(vccBuff, 4);
   }
 }
