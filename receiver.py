@@ -30,6 +30,16 @@ class CircularBuffer:
         self._sum = 0
         self._full = False
 
+    def from_buffer(buff: list[float]) -> "CircularBuffer":
+        self = CircularBuffer(len(buff))
+        self._buffer = buff
+        self._front = 0
+        self._back = len(buff) - 1
+        self._sum = sum(buff)
+        self._full = True
+
+        return self
+
     def append(self, value: float):
         self._incrememnt_index()
 
@@ -77,10 +87,10 @@ class Reading(t.Generic[T]):
 
 
 class Cmd:
-    STOP = b'X'
-    START = b'S'
-    ACK = b'A'
-    KAY = b'K'
+    STOP = b"X"
+    START = b"S"
+    ACK = b"A"
+    KAY = b"K"
 
 
 class Receiver:
@@ -141,20 +151,84 @@ class Receiver:
         return vcc
 
     def _read_vcc(self) -> int:
-        return int.from_bytes(self.ser.read(4), byteorder='little')
+        return int.from_bytes(self.ser.read(4), byteorder="little")
 
     def _read(self) -> int:
         """returns (V_read, I_read, VCC)"""
         # voltage: int = int.from_bytes(self.ser.read(2), byteorder='little')
-        current: int = int.from_bytes(self.ser.read(2), byteorder='little')
+        current: int = int.from_bytes(self.ser.read(2), byteorder="little")
         self.sample_count += 1
 
         return current
 
-    def stream_i_rms(self, n_samples: int, samples_per_second: float) -> t.Iterable[Reading[float]]:
-        squares_buff = CircularBuffer(n_samples)
+    def stream_i_rms_with_count(
+        self, n_samples: int, samples_per_second: float
+    ) -> t.Iterable[Reading[float]]:
+        return self.stream_i_rms_with_buffer(
+            CircularBuffer(n_samples), samples_per_second
+        )
+
+    def stream_i_rms_luis_llamas(self, factor: float, i_peak: float, r: float) -> Reading:
+        # based on https://www.luisllamas.es/en/arduino-current-sensor-sct-013/#assembly-with-resistors-and-midpoint
+        duration_s = 0.5
+
+        def fmap(x: float, in_min: float, in_max: float, out_min: float, out_max) -> float:
+            return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
+
+        v_peak = math.sqrt(2) * r * i_peak
+        # In the example ADCV is 5.0, but we have read it in as ~5000
+        adc_v = self.vcc / 1000
+
+        midpoint = adc_v / 2
+        v_min = midpoint - v_peak
+        v_max = midpoint + v_peak
+
+        def read() -> float:
+            voltage = self._read() * adc_v / self.adc_counts
+            return fmap(voltage, v_min, v_max, factor * -1, factor)
+
+        def generate_buffer() -> t.Iterable[float]:
+            end = get_now_ns() + (duration_s * 1000 * 1000 * 1000)
+            while get_now_ns() <= end:
+                current = read()
+                yield current * current
+
+        buff = CircularBuffer.from_buffer(list(generate_buffer()))
+
+        last_read = get_now_ns()
+        while True:
+            current = read()
+            buff.append(current * current)
+            this_read = get_now_ns()
+            if buff.full():
+                yield Reading(last_read, this_read, math.sqrt(buff.mean()))
+                last_read = this_read
+
+    def stream_i_rms_with_duration(
+        self, buffer_duration_s: float, samples_per_second: float
+    ) -> t.Iterable[Reading[float]]:
+        def sample_generator():
+            start = get_now_ns()
+            end = start + (buffer_duration_s * 1000 * 1000 * 1000)
+            while end >= get_now_ns():
+                # Digital low pass filter extracts the 2.5 V or 1.65 V dc offset,
+                # then subtract this - signal is now centered on 0 counts.
+                sample_i = float(self._read())
+                self.offset_i = self.offset_i + (sample_i - self.offset_i) / 1024
+                yield sample_i
+
+        buff = list(sample_generator())
+
+        return self.stream_i_rms_with_buffer(
+            CircularBuffer.from_buffer(buff), samples_per_second
+        )
+
+    def stream_i_rms_with_buffer(
+        self, squares_buff: CircularBuffer, samples_per_second: float
+    ) -> t.Iterable[Reading[float]]:
         last_sample_time = get_now_ns()
-        ns_per_sample = (1.0/samples_per_second) * 1000 * 1000 * 1000
+        last_emit = get_now_ns()
+        ns_per_sample = (1.0 / samples_per_second) * 1000 * 1000 * 1000
 
         while True:
             try:
@@ -173,7 +247,7 @@ class Receiver:
             squares_buff.append(sq_i)
 
             if squares_buff.full():
-                i_ratio = self.i_calibration * ((self.vcc / 1000.0) / self.adc_counts)
+                i_ratio = self.i_calibration * ((self.vcc / 1024.0) / self.adc_counts)
 
                 now = get_now_ns()
                 time_difference_ns = now - last_sample_time
@@ -182,6 +256,11 @@ class Receiver:
                     irms = i_ratio * math.sqrt(squares_buff.mean())
                     yield Reading(last_sample_time, now, irms)
                     last_sample_time = get_now_ns()
+
+                    if get_now_ns() - last_emit > 1000 * 1000 * 1000:
+                        last_emit = get_now_ns()
+                        print(f"irms: {irms}, last_sample: {sample_i}, offset: {self.offset_i}, ratio: {i_ratio}, mean: {squares_buff.mean()}", file=sys.stderr)
+
 
     def calc_i_rms(self, n_samples: int) -> int:
         sum_raw = 0
@@ -246,7 +325,10 @@ class Receiver:
         # Main measurement loop
         start = dt.datetime.now()
 
-        while cross_count < crossings and (dt.datetime.now() - start).seconds < timeout_seconds:
+        while (
+            cross_count < crossings
+            and (dt.datetime.now() - start).seconds < timeout_seconds
+        ):
             # Take measurement
             try:
                 sample_v, sample_i, _ = self._read()
@@ -290,11 +372,11 @@ class Receiver:
             if last_sample_crossed != check_cross:
                 cross_count += 1
 
-        v_ratio = self.v_calibration * ((supply_voltage/1000.0) / (self.adc_counts))
+        v_ratio = self.v_calibration * ((supply_voltage / 1000.0) / (self.adc_counts))
         vrms = v_ratio * math.sqrt(sum_v / sample_count)
         print(f"voltage: {vrms}, ratio: {v_ratio}, offset: {self.offset_v}")
 
-        i_ratio = self.i_calibration * ((supply_voltage/1000.0) / (self.adc_counts))
+        i_ratio = self.i_calibration * ((supply_voltage / 1000.0) / (self.adc_counts))
         irms = i_ratio * math.sqrt(sum_v / sample_count)
 
         real_power = v_ratio * i_ratio * sum_p / sample_count
@@ -305,9 +387,8 @@ class Receiver:
 
 
 def __main__():
-
     tty = sys.argv[1]
-    receiver = Receiver(tty, 54.5, 120.0, 1.0)
+    receiver = Receiver(tty, 60.6, 120.0, 1.0)
     start_time = dt.datetime.now()
 
     closed = False
@@ -331,11 +412,18 @@ def __main__():
 
     signal.signal(signal.SIGINT, signal_handler)
 
+    print(
+        f"Reading with VCC {receiver.vcc}",
+        file=sys.stderr,
+    )
     print(Reading.csv_header("apparent power", "W"))
 
     try:
-        for i_rms in receiver.stream_i_rms(500, 10000):
-            i_rms.value *= 120.0
+        # while True:
+        #     print(receiver._read())
+        #     time.sleep(0.5)
+        for i_rms in receiver.stream_i_rms_with_duration(0.5, 5000):
+            i_rms.value *= 122.5
             print(i_rms)
     finally:
         close()

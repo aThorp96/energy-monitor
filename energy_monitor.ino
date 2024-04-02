@@ -46,12 +46,12 @@ void loop() {
       }
   }
 
-  if (started) {
+  if (started && Serial.availableForWrite() >= 2) {
     // voltageValue = analogRead(VPIN);
     currentValue = analogRead(IPIN);
     // ;
 
-    // Serial.write(vBuff, 2);
     Serial.write(cBuff, 2);
+    // Serial.println(cBuff[0] + (cBuff[1] << 8));
   }
 }
