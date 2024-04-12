@@ -232,14 +232,16 @@ class Receiver:
 
         while True:
             try:
-                sample_i = self._read()
+                sample_i = float(self._read())
             except ValueError:
                 print("error reading, continuing...", file=sys.stderr)
                 continue
 
             # Digital low pass filter extracts the 2.5 V or 1.65 V dc offset,
             # then subtract this - signal is now centered on 0 counts.
-            self.offset_i = self.offset_i + (sample_i - self.offset_i) / 1024
+            self.offset_i = self.offset_i + (sample_i - round(self.offset_i)) / 1024
+            # Round the offset since the integer sample and
+            # the floating point offset introduces error
             filtered_i = sample_i - self.offset_i
 
             # RMS
@@ -255,11 +257,12 @@ class Receiver:
                 if time_difference_ns >= ns_per_sample:
                     irms = i_ratio * math.sqrt(squares_buff.mean())
                     yield Reading(last_sample_time, now, irms)
+                    # yield Reading(last_sample_time, now, filtered_i)
                     last_sample_time = get_now_ns()
 
                     if get_now_ns() - last_emit > 1000 * 1000 * 1000:
                         last_emit = get_now_ns()
-                        print(f"irms: {irms}, last_sample: {sample_i}, offset: {self.offset_i}, ratio: {i_ratio}, mean: {squares_buff.mean()}", file=sys.stderr)
+                        print(f"irms: {irms}, last_sample: {sample_i}, offset: {round(self.offset_i)}, ratio: {i_ratio}, mean: {squares_buff.mean()}", file=sys.stderr)
 
 
     def calc_i_rms(self, n_samples: int) -> int:
@@ -343,7 +346,7 @@ class Receiver:
             self.offset_v = self.offset_v + ((sample_v - self.offset_v) / 1024)
             filtered_v = sample_v - self.offset_v
             self.offset_i = self.offset_i + ((sample_i - self.offset_i) / 1024)
-            filtered_i = sample_i - self.offset_i
+            filtered_i = sample_i - round(self.offset_i)
 
             # RMS the voltage and current
             sq_v = filtered_v**2
@@ -388,7 +391,11 @@ class Receiver:
 
 def __main__():
     tty = sys.argv[1]
-    receiver = Receiver(tty, 60.6, 120.0, 1.0)
+    ct_ratio = 1250
+    if len(sys.argv) > 2:
+        ct_ratio = int(sys.argv[2])
+    # Current calibration is Rt (current transformer ratio, 2k) / Rb (burden resistor resistance)
+    receiver = Receiver(tty, ct_ratio / 200, 120.0, 1.0)
     start_time = dt.datetime.now()
 
     closed = False
@@ -423,7 +430,7 @@ def __main__():
         #     print(receiver._read())
         #     time.sleep(0.5)
         for i_rms in receiver.stream_i_rms_with_duration(0.5, 5000):
-            i_rms.value *= 122.5
+            i_rms.value *= 123.5
             print(i_rms)
     finally:
         close()
