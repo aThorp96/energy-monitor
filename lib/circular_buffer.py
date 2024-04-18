@@ -29,7 +29,7 @@ class CircularBuffer(t.Generic[T]):
         self._full = False
 
     @classmethod
-    def from_buffer(buff: list[T]) -> "CircularBuffer":
+    def from_buffer(cls, buff: list[T]) -> "CircularBuffer":
         self = CircularBuffer[T](len(buff))
         self._buffer = buff
         self._front = 0

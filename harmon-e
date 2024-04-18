@@ -3,7 +3,7 @@
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import datetime as dt
 import serial
-from enum import Enum
+from enum import IntEnum
 import sys
 import math
 import time
@@ -15,7 +15,7 @@ from lib.circular_buffer import CircularBuffer
 from lib.reading import Reading
 
 
-class Verbosity(Enum):
+class Verbosity(IntEnum):
     NONE = 0
     VERBOSE = 1
     ALL = 2
@@ -83,9 +83,10 @@ class Receiver:
             timeout=1,
         )
 
-    def __enter__(self):
+    def __enter__(self) -> "Receiver":
         self._start_time = dt.datetime.now()
         self.vcc = self._handshake()
+        return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         duration = dt.datetime.now() - self._start_time
