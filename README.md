@@ -1,13 +1,24 @@
-# Energy Monitor
-Based off of [Emonlib](https://github.com/openenergymonitor/EmonLib/tree/master), and the [OpenEnergyMonitor project](https://openenergymonitor.org/).
+# Hardware Monitor of Energy
+Based off of [Emonlib][emonlib], and the [OpenEnergyMonitor project][open-energy].
 Licensed accordingly.
+
+Hardware Monitor of Energy is Free hardware schematic, Arduino script,
+and python script which when combined offer high-resolution readings of
+Apparent Power. These readings are output in CSV format compatible with
+[Watt Wiser][watt-wiser], and have a high enough resolution to be
+correlated with software profiles.
 
 # Status
 This project is currently in beta.
 
 # Setup
-Before starting, it's recommended that you read through the documentation
-off of which this project is based: [Open Energy Monitor: Learn: Electricity Monitoring](https://docs.openenergymonitor.org/electricity-monitoring/index.html)
+## Before Starting
+1. **Safety**: Current Transformers can be dangerous if used incorrectly.
+Please read through [OpenEnergyMonitor's CT Safety][open-energy-ct-safety]
+documentation.
+1. It's recommended that you read through the documentation
+off of which this project is based: [Open Energy Monitor: Learn: Electricity Monitoring][open-energy-docs].
+
 
 Following OpenEnergyMonitor's guide to building an Arduino Energy Monitor,
 setup the following circuit:
@@ -30,7 +41,7 @@ usage: harmon-e [-h] [-V VOLTAGE] [-r CT_RATIO] [-R RESISTANCE] [-b ADC_BITS]
                 [--buffer-duration BUFFER_DURATION]
                 tty
 
-harmon-e (HARdware-MONitoring Energy). Read from an Arduino to stream high-
+harmon-e (HARdware-MONitor of Energy). Read from an Arduino to stream high-
 resolution energy usage readings in Watt-Wiser compatible CSV format.
 
 positional arguments:
@@ -65,3 +76,9 @@ Algorithm tuning:
 Part of the Watt Wise game jam in conjuction with Watt Wiser
 (https://wattwise.games)
 ```
+
+[emonlib]: https://github.com/openenergymonitor/EmonLib/tree/master
+[open-energy]: https://openenergymonitor.org/
+[open-energy-docs]: https://docs.openenergymonitor.org/electricity-monitoring/index.html
+[open-energy-ct-safety]: https://docs.openenergymonitor.org/electricity-monitoring/ct-sensors/introduction.html#safety
+[watt-wiser]: https://github.com/wattwisegames/watt-wiser

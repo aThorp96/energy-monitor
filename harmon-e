@@ -217,7 +217,7 @@ class Receiver:
 
 def arg_parser() -> ArgumentParser:
     parser = ArgumentParser(
-        description="harmon-e (HARdware-MONitoring Energy). Read from an Arduino to stream high-resolution energy usage readings in Watt-Wiser compatible CSV format.",
+        description="harmon-e (HARdware-MONitor of Energy). Read from an Arduino to stream high-resolution energy usage readings in Watt-Wiser compatible CSV format.",
         epilog="Part of the Watt Wise game jam in conjuction with Watt Wiser (https://wattwise.games)",
         formatter_class=ArgumentDefaultsHelpFormatter,
     )
