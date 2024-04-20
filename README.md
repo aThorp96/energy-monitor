@@ -4,9 +4,9 @@ Licensed accordingly.
 
 Hardware Monitor of Energy is Free hardware schematic, Arduino script,
 and python script which when combined offer high-resolution readings of
-Apparent Power. These readings are output in CSV format compatible with
-[Watt Wiser][watt-wiser], and have a high enough resolution to be
-correlated with software profiles.
+a given circuit's Apparent Power. These readings are output in CSV
+format compatible with [Watt Wiser][watt-wiser], and have a high enough
+resolution to be correlated with software profiles.
 
 # Status
 This project is currently in beta.
